@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use notify::{
     event::{CreateKind, ModifyKind, RemoveKind},
     Event, EventKind, RecursiveMode, Result, Watcher,
