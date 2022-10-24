@@ -33,7 +33,7 @@ impl State {
                 ttl.as_secs(),
                 timestamp(expiration),
             );
-            self.expirations.insert(path.clone(), expiration);
+            self.expirations.insert(path, expiration);
         }
     }
 
@@ -79,9 +79,8 @@ impl State {
                 ..
             } => {
                 for path in paths {
-                    self.expirations.remove(
-                        &path.canonicalize().unwrap().into_boxed_path()
-                    );
+                    self.expirations
+                        .remove(&path.canonicalize().unwrap().into_boxed_path());
                 }
             }
             Event {
