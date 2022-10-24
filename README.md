@@ -29,3 +29,6 @@ Only files will be deleted. Directories will not be touched.
 
 Filesystems with hard-linked loops will likely cause the daemon to infinitely
 loop. This should generally not be possible with most modern Unix-based systems.
+
+## License
+MIT or Apache 2.0
