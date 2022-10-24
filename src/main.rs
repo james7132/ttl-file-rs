@@ -1,4 +1,4 @@
-use notify::{Watcher, RecommendedWatcher, RecursiveMode, Result};
+use notify::{RecommendedWatcher, RecursiveMode, Result, Watcher};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Component, Path};
@@ -27,16 +27,21 @@ fn find_ttl(path: impl AsRef<Path>) -> Option<Duration> {
 }
 
 // Returns mapping of filepaths to expiration time
-fn initialize_files(root: impl AsRef<Path>) -> HashMap<Box<Path>, SystemTime> {
+fn initialize_files(
+    roots: impl IntoIterator<Item = impl AsRef<Path>>,
+) -> HashMap<Box<Path>, SystemTime> {
     let mut files = HashMap::new();
-    for result in WalkDir::new(root) {
+    for result in roots.into_iter().flat_map(|root| WalkDir::new(root)) {
         match result {
             Ok(entry) => {
+                let path = entry.path().canonicalize().unwrap();
+                if entry.file_type().is_dir() {
+                    log::info!("Watching directory {}", path.display());
+                }
                 if !entry.file_type().is_file() {
                     continue;
                 }
 
-                let path = entry.path().canonicalize().unwrap();
                 let ttl = if let Some(ttl) = find_ttl(&path) {
                     ttl
                 } else {
@@ -92,9 +97,29 @@ fn check_files(state: &mut HashMap<Box<Path>, SystemTime>) {
     });
 }
 
+fn find_directories(dirs: impl Iterator<Item = String>) -> Vec<Box<Path>> {
+    let mut directories = Vec::new();
+    for input in dirs {
+        match std::fs::canonicalize(&input) {
+            Ok(path) => directories.push(path.into_boxed_path()),
+            Err(err) => log::error!("Failed to watch {}. Skipping. Error: {}", input, err),
+        }
+    }
+    directories
+}
+
 fn main() {
     env_logger::init();
-    let mut state = initialize_files("./test");
+    let mut directories = find_directories(std::env::args());
+    if directories.is_empty() {
+        directories.push(
+            std::fs::canonicalize(std::env::current_dir().unwrap())
+                .unwrap()
+                .into_boxed_path(),
+        );
+    }
+    let mut state = initialize_files(directories);
+
     loop {
         check_files(&mut state);
         std::thread::sleep(Duration::from_secs(1));
