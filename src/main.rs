@@ -4,9 +4,9 @@ use notify::{
     event::{CreateKind, ModifyKind, RemoveKind},
     Event, EventKind, RecursiveMode, Result, Watcher,
 };
+use parking_lot::Mutex;
 use std::ffi::OsStr;
 use std::path::{Component, Path};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
 
@@ -179,10 +179,9 @@ fn main() -> Result<()> {
         );
     }
 
-    let state = Arc::new(Mutex::new(initialize_files(&directories)));
-    let notify_state = state.clone();
-    let mut watcher = notify::recommended_watcher(move |res| match res {
-        Ok(event) => notify_state.lock().unwrap().handle_notify_event(event),
+    let state = Box::leak(Box::new(Mutex::new(initialize_files(&directories))));
+    let mut watcher = notify::recommended_watcher(|res| match res {
+        Ok(event) => state.lock().handle_notify_event(event),
         Err(e) => println!("watch error: {:?}", e),
     })?;
 
@@ -191,7 +190,7 @@ fn main() -> Result<()> {
     }
 
     loop {
-        state.lock().unwrap().check_files();
+        state.lock().check_files();
         std::thread::sleep(Duration::from_secs(1));
     }
 }

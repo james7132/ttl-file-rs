@@ -10,6 +10,7 @@ env_logger = "0.9"
 log = "0.4"
 walkdir = "2.3"
 humantime = "2.1"
+parking_lot = "0.12"
 
 [profile.release]
 opt-level = "z"
