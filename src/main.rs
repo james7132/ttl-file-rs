@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
+use dashmap::DashMap;
 use notify::{
     event::{CreateKind, ModifyKind, RemoveKind},
     Event, EventKind, RecursiveMode, Result, Watcher,
 };
-use parking_lot::Mutex;
 use std::ffi::OsStr;
 use std::path::{Component, Path};
 use std::time::{Duration, SystemTime};
@@ -12,11 +12,11 @@ use walkdir::WalkDir;
 
 #[derive(Default)]
 struct State {
-    expirations: std::collections::HashMap<Box<Path>, SystemTime>,
+    expirations: DashMap<Box<Path>, SystemTime>,
 }
 
 impl State {
-    fn add_file(&mut self, path: Box<Path>) {
+    fn add_file(&self, path: Box<Path>) {
         let ttl = if let Some(ttl) = find_ttl(&path) {
             ttl
         } else {
@@ -37,7 +37,7 @@ impl State {
         }
     }
 
-    fn check_files(&mut self) {
+    fn check_files(&self) {
         let now = SystemTime::now();
         self.expirations.retain(|path, expiration| {
             if now <= *expiration {
@@ -59,7 +59,7 @@ impl State {
         });
     }
 
-    fn handle_notify_event(&mut self, event: Event) {
+    fn handle_notify_event(&self, event: Event) {
         match event {
             // Created new files
             Event {
@@ -130,7 +130,7 @@ fn find_ttl(path: impl AsRef<Path>) -> Option<Duration> {
 
 // Returns mapping of filepaths to expiration time
 fn initialize_files(roots: impl IntoIterator<Item = impl AsRef<Path>>) -> State {
-    let mut state = State::default();
+    let state = State::default();
     for result in roots.into_iter().flat_map(|root| WalkDir::new(root)) {
         match result {
             Ok(entry) => {
@@ -179,9 +179,9 @@ fn main() -> Result<()> {
         );
     }
 
-    let state = Box::leak(Box::new(Mutex::new(initialize_files(&directories))));
+    let state = Box::leak(Box::new(initialize_files(&directories)));
     let mut watcher = notify::recommended_watcher(|res| match res {
-        Ok(event) => state.lock().handle_notify_event(event),
+        Ok(event) => state.handle_notify_event(event),
         Err(e) => println!("watch error: {:?}", e),
     })?;
 
@@ -190,7 +190,7 @@ fn main() -> Result<()> {
     }
 
     loop {
-        state.lock().check_files();
+        state.check_files();
         std::thread::sleep(Duration::from_secs(1));
     }
 }

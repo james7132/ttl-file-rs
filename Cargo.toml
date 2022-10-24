@@ -5,15 +5,24 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-notify = "5.0"
-env_logger = "0.9"
 log = "0.4"
 walkdir = "2.3"
 humantime = "2.1"
-parking_lot = "0.12"
+dashmap = "5.4"
+
+[dependencies.env_logger]
+version = "0.9"
+default_features = false
+features = ["humantime"]
+
+[dependencies.notify]
+version = "5.0"
+default_features = false
+features = ["macos_fsevent"]
 
 [profile.release]
 opt-level = "z"
 lto = true
 strip = true
 panic = "abort"
+codegen-units = 1
