@@ -5,7 +5,6 @@ that have exceeded a configured
 [time-to-live](https://en.wikipedia.org/wiki/Time_to_live).
 
 ## Usage
-
 ```bash
 ttl-file <ROOT DIRECTORIES>
 ```
@@ -29,6 +28,20 @@ Only files will be deleted. Directories will not be touched.
 
 Filesystems with hard-linked loops will likely cause the daemon to infinitely
 loop. This should generally not be possible with most modern Unix-based systems.
+
+## Docker Container
+You can use the daemon as a Docker container. An example docker-compose.yml file:
+
+```yaml
+version: "3.9"
+services:
+  ttl:
+    image: ghcr.io/james7132/ttl-file-rs:latest
+    volume:
+      # By default everything under /ttl is watched by the daemon
+      - /your/host/directory/here/1:/ttl/ttl=30d/container/directory
+      - /your/host/directory/here/2:/ttl/ttl=10m/container/directory
+```
 
 ## License
 MIT or Apache 2.0
