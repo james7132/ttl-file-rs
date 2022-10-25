@@ -15,6 +15,6 @@ RUN upx --best --lzma target/x86_64-unknown-linux-musl/release/ttl-file
 ## Final image
 ################################################################################
 FROM scratch
+WORKDIR /ttl
 COPY --from=builder /ttl/target/x86_64-unknown-linux-musl/release/ttl-file ./
-RUN mkdir /ttl
 CMD ["/ttl/ttl-file", "/ttl"]
