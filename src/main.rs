@@ -2,38 +2,38 @@
 
 use dashmap::DashMap;
 use notify::{
-    event::{CreateKind, ModifyKind, RemoveKind},
+    event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
     Event, EventKind, RecursiveMode, Result, Watcher,
 };
 use std::ffi::OsStr;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
 
 #[derive(Default)]
 struct State {
-    expirations: DashMap<Box<Path>, SystemTime>,
+    expirations: DashMap<PathBuf, SystemTime>,
 }
 
 impl State {
-    fn add_file(&self, path: Box<Path>) {
-        let ttl = if let Some(ttl) = find_ttl(&path) {
+    fn add_file(&self, path: &PathBuf) {
+        let ttl = if let Some(ttl) = find_ttl(path) {
             ttl
         } else {
-            log::info!("Skipping {} (no ttl in path)", path.display(),);
+            log::debug!("Skipping {} (no ttl in path)", path.display(),);
             return;
         };
 
-        if let Ok(metadata) = std::fs::metadata(&path) {
+        if let Ok(metadata) = std::fs::metadata(path) {
             let creation_time = metadata.created().unwrap();
             let expiration = creation_time + ttl;
             log::info!(
-                "Found {} (ttl={}s) (expiration={})",
+                "Watching file: {} (ttl={}s) (expiration={})",
                 path.display(),
                 ttl.as_secs(),
                 timestamp(expiration),
             );
-            self.expirations.insert(path, expiration);
+            self.expirations.insert(path.clone(), expiration);
         }
     }
 
@@ -61,16 +61,14 @@ impl State {
 
     fn handle_notify_event(&self, event: Event) {
         match event {
-            // Created new files
             Event {
-                kind: EventKind::Create(info),
+                kind: EventKind::Create(CreateKind::File),
                 paths,
                 ..
             } => {
-                if info == CreateKind::File {
-                    for path in paths {
-                        self.add_file(path.into_boxed_path());
-                    }
+                for path in paths.iter() {
+                    log::info!("Watch file: {}", path.display());
+                    self.add_file(path);
                 }
             }
             Event {
@@ -79,30 +77,25 @@ impl State {
                 ..
             } => {
                 for path in paths {
-                    self.expirations
-                        .remove(&path.canonicalize().unwrap().into_boxed_path());
+                    log::info!("Unwatch file: {}", path.display());
+                    self.expirations.remove(&path);
                 }
             }
             Event {
-                kind: EventKind::Remove(RemoveKind::Folder),
+                kind: EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
                 paths,
                 ..
             } => {
-                for path in paths {
-                    let path = path.canonicalize().unwrap();
-                    self.expirations.retain(|file_path, _| {
-                        let file_path = file_path.canonicalize().unwrap();
-                        !file_path.starts_with(&path)
-                    });
-                }
+                assert_eq!(paths.len(), 2);
+                log::info!(
+                    "Move file: {} -> {}",
+                    paths[0].display(),
+                    paths[1].display()
+                );
+                self.expirations.remove(&paths[0]);
+                self.add_file(&paths[1]);
             }
-            Event {
-                kind: EventKind::Modify(ModifyKind::Name(_)),
-                ..
-            } => {
-                // TODO(james7132): Complete this implementation
-            }
-            _ => {}
+            evt => log::debug!("Unknown Event: {:?}", evt),
         }
     }
 }
@@ -113,12 +106,12 @@ fn timestamp(time: SystemTime) -> u64 {
         .as_secs()
 }
 
-fn parse_ttl(ttl: impl AsRef<OsStr>) -> Option<Duration> {
-    humantime::parse_duration(ttl.as_ref().to_string_lossy().strip_prefix("ttl=")?).ok()
+fn parse_ttl(ttl: &OsStr) -> Option<Duration> {
+    humantime::parse_duration(ttl.to_string_lossy().strip_prefix("ttl=")?).ok()
 }
 
-fn find_ttl(path: impl AsRef<Path>) -> Option<Duration> {
-    for component in path.as_ref().components().rev() {
+fn find_ttl(path: &PathBuf) -> Option<Duration> {
+    for component in path.components().rev() {
         if let Component::Normal(comp) = component {
             if let Some(ttl) = parse_ttl(comp) {
                 return Some(ttl);
@@ -134,14 +127,11 @@ fn initialize_files(roots: impl IntoIterator<Item = impl AsRef<Path>>) -> State 
     for result in roots.into_iter().flat_map(|root| WalkDir::new(root)) {
         match result {
             Ok(entry) => {
-                let path = entry.path().canonicalize().unwrap();
-                if entry.file_type().is_dir() {
-                    log::info!("Watching directory {}", path.display());
-                }
                 if !entry.file_type().is_file() {
                     continue;
                 }
-                state.add_file(path.into_boxed_path());
+                let path = entry.path().canonicalize().unwrap();
+                state.add_file(&path);
             }
             Err(err) => {
                 if let Some(path) = err.path() {
@@ -157,11 +147,11 @@ fn initialize_files(roots: impl IntoIterator<Item = impl AsRef<Path>>) -> State 
     state
 }
 
-fn find_directories(dirs: impl Iterator<Item = String>) -> Vec<Box<Path>> {
+fn find_directories(dirs: impl Iterator<Item = String>) -> Vec<PathBuf> {
     let mut directories = Vec::new();
     for input in dirs {
         match std::fs::canonicalize(&input) {
-            Ok(path) => directories.push(path.into_boxed_path()),
+            Ok(path) => directories.push(path),
             Err(err) => log::error!("Failed to watch {}. Skipping. Error: {}", input, err),
         }
     }
@@ -172,17 +162,13 @@ fn main() -> Result<()> {
     env_logger::init();
     let mut directories = find_directories(std::env::args());
     if directories.is_empty() {
-        directories.push(
-            std::fs::canonicalize(std::env::current_dir().unwrap())
-                .unwrap()
-                .into_boxed_path(),
-        );
+        directories.push(std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap());
     }
 
     let state = Box::leak(Box::new(initialize_files(&directories)));
     let mut watcher = notify::recommended_watcher(|res| match res {
         Ok(event) => state.handle_notify_event(event),
-        Err(e) => println!("watch error: {:?}", e),
+        Err(e) => log::error!("watch error: {:?}", e),
     })?;
 
     for root in directories {
