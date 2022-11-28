@@ -11,7 +11,7 @@ humantime = "2.1"
 dashmap = "5.4"
 
 [dependencies.env_logger]
-version = "0.9"
+version = "0.10"
 default_features = false
 features = ["humantime"]
 
