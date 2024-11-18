@@ -1,18 +1,19 @@
 #![forbid(unsafe_code)]
 
-use dashmap::DashMap;
 use notify::{
     event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
     Event, EventKind, RecursiveMode, Result, Watcher,
 };
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
 
 #[derive(Default)]
 struct State {
-    expirations: DashMap<PathBuf, SystemTime>,
+    expirations: Mutex<HashMap<PathBuf, SystemTime>>,
 }
 
 impl State {
@@ -33,30 +34,36 @@ impl State {
                 ttl.as_secs(),
                 timestamp(expiration),
             );
-            self.expirations.insert(path.clone(), expiration);
+            self.expirations
+                .lock()
+                .expect("lock shouldn't be poisoned")
+                .insert(path.clone(), expiration);
         }
     }
 
     fn check_files(&self) {
         let now = SystemTime::now();
-        self.expirations.retain(|path, expiration| {
-            if now <= *expiration {
-                return true;
-            }
-            match std::fs::remove_file(path) {
-                Ok(()) => {
-                    log::info!(
-                        "Deleted {} ({} > {})",
-                        path.display(),
-                        timestamp(now),
-                        timestamp(*expiration)
-                    );
-                    return false;
+        self.expirations
+            .lock()
+            .expect("lock shouldn't be poisoned")
+            .retain(|path, expiration| {
+                if now <= *expiration {
+                    return true;
                 }
-                Err(err) => log::error!("Error while deleting {}: {}", path.display(), err),
-            }
-            true
-        });
+                match std::fs::remove_file(path) {
+                    Ok(()) => {
+                        log::info!(
+                            "Deleted {} ({} > {})",
+                            path.display(),
+                            timestamp(now),
+                            timestamp(*expiration)
+                        );
+                        return false;
+                    }
+                    Err(err) => log::error!("Error while deleting {}: {}", path.display(), err),
+                }
+                true
+            });
     }
 
     fn handle_notify_event(&self, event: Event) {
@@ -78,7 +85,10 @@ impl State {
             } => {
                 for path in paths {
                     log::info!("Unwatch file: {}", path.display());
-                    self.expirations.remove(&path);
+                    self.expirations
+                        .lock()
+                        .expect("lock shouldn't be poisoned")
+                        .remove(&path);
                 }
             }
             Event {
@@ -92,7 +102,10 @@ impl State {
                     paths[0].display(),
                     paths[1].display()
                 );
-                self.expirations.remove(&paths[0]);
+                self.expirations
+                    .lock()
+                    .expect("lock shouldn't be poisoned")
+                    .remove(&paths[0]);
                 self.add_file(&paths[1]);
             }
             evt => log::debug!("Unknown Event: {:?}", evt),
